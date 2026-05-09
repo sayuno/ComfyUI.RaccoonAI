@@ -117,6 +117,8 @@ function showDialog(positivePrompt) {
         box.querySelector("#sc-cancel").addEventListener("click", () => close(null));
         box.querySelector("#sc-confirm").addEventListener("click", () => { const v = input.value.trim(); if (!v) { input.style.borderColor = "#f38ba8"; return; } close(v); });
         input.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") { const v = input.value.trim(); if (v) close(v); } if (e.key === "Escape") close(null); });
+        input.addEventListener("keyup",   e => e.stopPropagation());
+        input.addEventListener("keypress", e => e.stopPropagation());
         overlay.addEventListener("click", e => { if (e.target === overlay) close(null); });
     });
 }
