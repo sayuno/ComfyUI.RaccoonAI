@@ -1,0 +1,17 @@
+{
+  "_comment": "Configs por nome de workflow. Use '_default' como fallback global. Ou adicione um Note com título RACCOON_CONFIG no workflow para override por workflow.",
+
+  "_default": {
+    "checkpoint": { "strategy": "auto" },
+    "positive":   { "strategy": "auto" },
+    "negative":   { "strategy": "auto" },
+    "sampler":    { "strategy": "auto" }
+  },
+
+  "HENTAI IMAGE": {
+    "checkpoint": { "strategy": "node_type",  "nodeType": "Checkpoint Selector" },
+    "positive":   { "strategy": "node_title", "nodeType": "CLIPTextEncode", "title": "POSITIVE" },
+    "negative":   { "strategy": "node_title", "nodeType": "CLIPTextEncode", "title": "NEGATIVE" },
+    "sampler":    { "strategy": "ksampler_advanced" }
+  }
+}
