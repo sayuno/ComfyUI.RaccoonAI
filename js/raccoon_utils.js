@@ -3,6 +3,35 @@ import { app } from "../../scripts/app.js";
 export const RACCOON_API = "http://localhost:6969";
 const CONFIG_URL = "/extensions/raccoon_utils/raccoon_config.json";
 
+// ── Settings (apiUrl + apiToken) ──────────────────────────────────────
+
+let _settingsCache = null;
+
+async function loadSettings() {
+    if (_settingsCache) return _settingsCache;
+    try {
+        const res = await fetch(CONFIG_URL + "?t=" + Date.now());
+        if (!res.ok) { _settingsCache = {}; return _settingsCache; }
+        const cfg = await res.json();
+        _settingsCache = cfg["_settings"] ?? {};
+    } catch {
+        _settingsCache = {};
+    }
+    return _settingsCache;
+}
+
+async function getApiBase() {
+    const s = await loadSettings();
+    return (s.apiUrl || RACCOON_API).replace(/\/$/, "");
+}
+
+async function getAuthHeaders() {
+    const s = await loadSettings();
+    if (s.apiKey)   return { "X-Raccoon-Key": s.apiKey };
+    if (s.apiToken) return { "Authorization": `Bearer ${s.apiToken}` };
+    return {};
+}
+
 // ── Config ────────────────────────────────────────────────────────────
 
 export async function loadWorkflowConfig() {
@@ -12,7 +41,10 @@ export async function loadWorkflowConfig() {
     // Note pode referenciar um named config: { "use": "HENTAI IMAGE" }
     if (note?.use) {
         const file = await readFileConfig();
-        return file[note.use] ?? file["_default"] ?? {};
+        const base = file[note.use] ?? file["_default"] ?? {};
+        // Preserve node connections (checkpointNode, positiveNode, etc.) from RaccoonConfig inputs
+        const { use: _use, ...nodeConnections } = note;
+        return { ...base, ...nodeConnections };
     }
     if (note) return note;
 
@@ -245,51 +277,55 @@ function extractPromptAuto(nodes, field) {
 
 export function extractSamplerData(nodes, config) {
     const result = {};
+    const lv = (node, idx) => node?.widgets?.[idx]?.value ?? node?.widgets_values?.[idx];
 
     // KSampler conectado → seed principal + parâmetros base
     if (config?.ksamplerNode) {
-        const wv = config.ksamplerNode.widgets_values ?? [];
+        const n = config.ksamplerNode;
         // seed, control_after, steps, cfg, sampler_name, scheduler, denoise
-        result.seed    = String(wv[0] ?? "");
-        result.steps   = String(wv[2] ?? "");
-        result.cfg     = String(wv[3] ?? "");
-        result.sampler = wv[4] ?? null;
-        result.scheduler = wv[5] ?? null;
-        result.denoise = String(wv[6] ?? "");
+        result.seed      = String(lv(n, 0) ?? "");
+        result.steps     = String(lv(n, 2) ?? "");
+        result.cfg       = String(lv(n, 3) ?? "");
+        result.sampler   = lv(n, 4) ?? null;
+        result.scheduler = lv(n, 5) ?? null;
+        result.denoise   = String(lv(n, 6) ?? "");
     }
 
     // KSamplerAdvanced conectado → noise seed + parâmetros finais (sobrescreve se ambos conectados)
     if (config?.ksamplerAdvancedNode) {
-        const wv = config.ksamplerAdvancedNode.widgets_values ?? [];
+        const n = config.ksamplerAdvancedNode;
         // add_noise, noise_seed, control_after, steps, cfg, sampler_name, scheduler, start_at, end_at, return_noise
-        result.noiseSeed = String(wv[1] ?? "");
-        result.steps     = String(wv[3] ?? "");
-        result.cfg       = String(wv[4] ?? "");
-        result.sampler   = wv[5] ?? null;
-        result.scheduler = wv[6] ?? null;
+        result.noiseSeed = String(lv(n, 1) ?? "");
+        result.steps     = String(lv(n, 3) ?? "");
+        result.cfg       = String(lv(n, 4) ?? "");
+        result.sampler   = lv(n, 5) ?? null;
+        result.scheduler = lv(n, 6) ?? null;
         result.denoise   = null;
     }
 
     if (Object.keys(result).length > 0) return result;
 
-    const strategy = config?.sampler?.strategy ?? "auto";
-
-    if (strategy === "ksampler_advanced") {
-        const ks = nodes.find(n => n.type === "KSamplerAdvanced");
-        if (ks) {
-            const wv = ks.widgets_values ?? [];
-            // add_noise, noise_seed, control_after, steps, cfg, sampler, scheduler, start_at, end_at, return_noise
-            return { seed: String(wv[1] ?? ""), steps: String(wv[3] ?? ""), cfg: String(wv[4] ?? ""), sampler: wv[5] ?? null, scheduler: wv[6] ?? null, denoise: null };
-        }
-    }
-
-    // auto / ksampler
-    const ks = nodes.find(n => n.type === "KSampler");
+    // auto: pick the BASE KSampler (latent from EmptyLatentImage, not fed by another sampler),
+    // so 2-KSampler base+refiner workflows don't grab the refiner. Fallback: first KSampler.
+    const ksamplers = nodes.filter(n => n.type === "KSampler");
+    const isSamplerType = t => t === "KSampler" || t === "KSamplerAdvanced";
+    const ks =
+        ksamplers.find(k => followInput(k, 3)?.type === "EmptyLatentImage") ??
+        ksamplers.find(k => !isSamplerType(followInput(k, 3)?.type)) ??
+        ksamplers[0];
     if (ks) {
         const wv = ks.widgets_values ?? [];
         // seed, control_after, steps, cfg, sampler, scheduler, denoise
         return { seed: String(wv[0] ?? ""), steps: String(wv[2] ?? ""), cfg: String(wv[3] ?? ""), sampler: wv[4] ?? null, scheduler: wv[5] ?? null, denoise: String(wv[6] ?? "") };
     }
+
+    const ksa = nodes.find(n => n.type === "KSamplerAdvanced");
+    if (ksa) {
+        const wv = ksa.widgets_values ?? [];
+        // add_noise, noise_seed, control_after, steps, cfg, sampler, scheduler, start_at, end_at, return_noise
+        return { seed: String(wv[1] ?? ""), steps: String(wv[3] ?? ""), cfg: String(wv[4] ?? ""), sampler: wv[5] ?? null, scheduler: wv[6] ?? null, denoise: null };
+    }
+
     return {};
 }
 
@@ -299,8 +335,8 @@ export function findLoras(nodes) {
     const loras = [];
     const seen = new Set();
 
-    const power = nodes.find(n => n.type === "Power Lora Loader (rgthree)");
-    if (power) {
+    const powerNodes = nodes.filter(n => n.type === "Power Lora Loader (rgthree)");
+    for (const power of powerNodes) {
         const sources = [...(power.widgets ?? []).map(w => w.value), ...(power.widgets_values ?? [])];
         for (const item of sources) {
             if (item && typeof item === "object" && typeof item.lora === "string" && item.lora && item.on !== false && !seen.has(item.lora)) {
@@ -308,8 +344,8 @@ export function findLoras(nodes) {
                 loras.push({ name: basename(item.lora), weight: item.strength ?? null });
             }
         }
-        if (loras.length) return loras;
     }
+    if (loras.length) return loras;
 
     for (const node of nodes.filter(n => n.type === "LoraLoader")) {
         const name = node.widgets_values?.[0];
@@ -447,6 +483,7 @@ export function blobToBase64(blob) {
 }
 
 export async function saveInspiration(title, data, imageBlob) {
+    const [base, auth] = await Promise.all([getApiBase(), getAuthHeaders()]);
     const fd = new FormData();
     fd.append("title", title);
     if (data.checkpoint)     fd.append("checkpoint", data.checkpoint);
@@ -462,18 +499,19 @@ export async function saveInspiration(title, data, imageBlob) {
     if (data.loras?.length)  fd.append("lorasJson",  JSON.stringify(data.loras.map(l => ({ name: l.name, weight: l.weight }))));
     if (imageBlob)           fd.append("image",      imageBlob, "preview.png");
 
-    const res = await fetch(`${RACCOON_API}/api/inspirations`, { method: "POST", body: fd });
+    const res = await fetch(`${base}/api/inspirations`, { method: "POST", headers: auth, body: fd });
     if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
     return res.json();
 }
 
 export async function savePromptCard(name, tags, categoryId, imageBlob) {
+    const [base, auth] = await Promise.all([getApiBase(), getAuthHeaders()]);
     const body = { categoryId, name, tags };
     if (imageBlob) body.previewImage = await blobToBase64(imageBlob);
 
-    const res = await fetch(`${RACCOON_API}/api/prompt-cards`, {
+    const res = await fetch(`${base}/api/prompt-cards`, {
         method:  "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auth },
         body:    JSON.stringify(body)
     });
     if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
