@@ -38,4 +38,9 @@ NODE_CLASS_MAPPINGS        = { "RaccoonConfig": RaccoonConfig }
 NODE_DISPLAY_NAME_MAPPINGS = { "RaccoonConfig": "Raccoon Config 🦝" }
 WEB_DIRECTORY = "./js"
 
+# Raccoon Active Tags lives in its own module so it merges cleanly with the other node files.
+from .active_tags import NODE_CLASS_MAPPINGS as _ACTIVE_TAGS_CLASSES, NODE_DISPLAY_NAME_MAPPINGS as _ACTIVE_TAGS_NAMES
+NODE_CLASS_MAPPINGS.update(_ACTIVE_TAGS_CLASSES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_ACTIVE_TAGS_NAMES)
+
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
